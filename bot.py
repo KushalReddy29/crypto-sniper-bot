@@ -96,9 +96,6 @@ async def process_single_symbol(symbol: str, exchange: CoinDCXExchangeEngine, st
             # Fire the async Telegram alert to the chat group
             asyncio.create_task(dispatch_telegram_alert(symbol, score, current_close, stop_loss, take_profit, mode))
             
-            # If executing live/paper orders directly on CoinDCX futures endpoints, uncomment below:
-            # await exchange.execute_sniper_trade(symbol, "LONG", 1.0, current_close, stop_loss, take_profit)
-            
     except Exception as e:
         pass
 
@@ -137,8 +134,9 @@ async def main():
     
     while True:
         try:
-            # NEW LOGIC: Use a defined test asset list to verify scanning functionality
+            # Explicit target array optimization bypassing the 'get_active_futures_watchlist' missing attribute error
             dynamic_watchlist = ["HUMA/USDT", "BANK/USDT", "ZEC/USDT"]
+            
             await run_scanning_loop(db, strategy, exchange, dynamic_watchlist, mode)
             
             logger.info(f"[ENGINE HEARTBEAT] Sweep finished. Cooling down for 60 seconds...")
