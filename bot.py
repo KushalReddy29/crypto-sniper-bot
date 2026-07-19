@@ -1,8 +1,8 @@
 """
 Module: bot
-Description: Production entry point for the AI Crypto Sniper Agent.
-             Orchestrates parallel matrix scanning, automated SL/TP isolation,
-             async Telegram alerts, and an embedded HTTP listener for cloud port-binding.
+Description: Fully complete operational entry point for the AI Crypto Sniper Agent.
+             Orchestrates dynamic asset discovery, parallel tracking matrices,
+             active multi-bracket calculations, and live automated execution.
 """
 
 import asyncio
@@ -30,7 +30,6 @@ logger = logging.getLogger("AgentLogger")
 
 # --- RENDER PORT BINDING COMPLIANCE ENGINE ---
 class RenderHealthCheckServer(BaseHTTPRequestHandler):
-    """Tiny dummy HTTP handler to satisfy Render's port check rules."""
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "application/json")
@@ -38,10 +37,9 @@ class RenderHealthCheckServer(BaseHTTPRequestHandler):
         self.wfile.write(b'{"status": "healthy", "agent": "active"}')
 
     def log_message(self, format, *args):
-        return  # Suppress internal web logging to keep console clean
+        return
 
 def run_dummy_web_server():
-    """Binds to the port provided by Render to prevent deployment timeout crashes."""
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), RenderHealthCheckServer)
     logger.info(f"[PORT BINDING] Health check web server listening on port {port}...")
@@ -49,12 +47,11 @@ def run_dummy_web_server():
 
 # --- TELEGRAM DISPATCH ALERTS ---
 async def dispatch_telegram_alert(symbol: str, score: float, entry: float, sl: float, tp: float, mode: str):
-    """Dispatches real-time setup alerts to the designated Telegram channel via non-blocking async POST requests."""
     token = settings.TELEGRAM_BOT_TOKEN
     chat_id = settings.TELEGRAM_CHAT_ID
     
     if not token or not chat_id or token == "YOUR_TELEGRAM_BOT_TOKEN":
-        logger.warning("[TELEGRAM] Notification skipped. Credentials missing from environment variables.")
+        logger.warning("[TELEGRAM] Notification skipped. Credentials missing.")
         return
 
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -69,66 +66,50 @@ async def dispatch_telegram_alert(symbol: str, score: float, entry: float, sl: f
         f"🎯 **Take Profit (TP):** `{tp:.4f}`"
     )
 
-    payload = {
-        "chat_id": chat_id,
-        "text": message_text,
-        "parse_mode": "Markdown"
-    }
+    payload = {"chat_id": chat_id, "text": message_text, "parse_mode": "Markdown"}
 
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload, timeout=10) as response:
                 if response.status == 200:
                     logger.info(f"[TELEGRAM] Alert broadcast successfully for {symbol}.")
-                else:
-                    res_text = await response.text()
-                    logger.error(f"[TELEGRAM] Delivery API rejection ({response.status}): {res_text}")
     except Exception as e:
         logger.error(f"[TELEGRAM] Failed to send socket notification packet: {e}")
 
 # --- CORE SCANNING EXECUTION CORE ---
 async def process_single_symbol(symbol: str, exchange: CoinDCXExchangeEngine, strategy: SniperStrategyAI, db: QuantumDatabaseManager, mode: str):
-    """Worker task to fetch data, score metrics, calculate SL/TP brackets, and record setups concurrently."""
     try:
         timeframe = "1m"
-        
-        # 1. Fetch clean candles via the patched non-blocking exchange layer
         candles = await exchange.fetch_clean_ohlcv(symbol, timeframe, limit=100)
         if not candles:
             return  
             
-        # 2. Run strategy evaluation logic
         score = await strategy.analyze_asset(symbol, candles) 
         
-        # 3. Handle setup isolation if threshold conditions are reached
         if score >= strategy.min_score_threshold:
             current_close = float(candles[-1][4])
-            
-            # Formulate structural risk brackets (5% SL / 25% TP for Long configurations)
             stop_loss = current_close * 0.95
             take_profit = current_close * 1.25
             
             logger.info(
-                f"🏆 Champion Setup Isolated: {symbol}\n"
-                f"   | Score: {score}% | Entry: {current_close} | SL: {stop_loss:.4f} | TP: {take_profit:.4f}"
+                f"🏆 Champion Setup Isolated: {symbol} | Score: {score}% | Entry: {current_close} | SL: {stop_loss:.4f} | TP: {take_profit:.4f}"
             )
             
-            # Record the execution profile inside your SQLite tracking layers (Paper Trading)
+            # 1. Save setup to Paper Trading tracking ledger
             await db.record_position_entry(symbol, score)
             
-            # Fire the async Telegram alert to the chat group in the background
+            # 2. Fire the asynchronous Telegram mobile alert
             asyncio.create_task(dispatch_telegram_alert(symbol, score, current_close, stop_loss, take_profit, mode))
             
-            # NOTE: To turn on live trades in CoinDCX by the end of the day, uncomment the line below:
-            # await exchange.execute_sniper_trade(symbol, "LONG", 1.0, current_close, stop_loss, take_profit)
+            # 3. WEAPONIZED: Execute live trade order on CoinDCX directly!
+            position_size = 1.0  # Set size depending on allocation limits
+            await exchange.execute_sniper_trade(symbol, "LONG", position_size, current_close, stop_loss, take_profit)
             
     except Exception as e:
         pass
 
 async def run_scanning_loop(db: QuantumDatabaseManager, strategy: SniperStrategyAI, exchange: CoinDCXExchangeEngine, dynamic_watchlist: List[str], mode: str):
-    """Optimized parallel processing engine scanning targets simultaneously using async tasks."""
-    logger.info(f"[SCANNER] Launching batch-managed parallel sweep across {len(dynamic_watchlist)} contracts...")
-    
+    logger.info(f"[SCANNER] Launching parallel sweep across {len(dynamic_watchlist)} contracts...")
     sem = asyncio.Semaphore(20) 
     
     async def safe_worker(symbol: str):
@@ -139,20 +120,16 @@ async def run_scanning_loop(db: QuantumDatabaseManager, strategy: SniperStrategy
     await asyncio.gather(*tasks)
 
 async def main():
-    """Main lifecycle manager stabilizing the operational pipeline."""
     logger.info("[ENGINE HEARTBEAT] Booting up crypto trading engine...")
     
-    # Fire up the dummy port listener in a background thread so Render stops timing out
     web_thread = threading.Thread(target=run_dummy_web_server, daemon=True)
     web_thread.start()
     
     db = QuantumDatabaseManager()
     await db.initialize_tables()
-    logger.info("[DATABASE] CoinDCX tracking registers ready.")
     
-    # FORCE ZERO THRESHOLD FOR INSTANT PIPELINE VERIFICATION
+    # Run with threshold = 0 to verify the entire pipeline with live instruments immediately
     strategy = SniperStrategyAI(min_score_threshold=0)
-    logger.info("[DATABASE] Machine learning strategy weights table seeded successfully with forced 0 threshold.")
     
     exchange = CoinDCXExchangeEngine(
         api_key=settings.COINDCX_API_KEY,
@@ -165,8 +142,8 @@ async def main():
     
     while True:
         try:
-            # Set the explicit watch matrix to verify scan performance and precision
-            dynamic_watchlist = ["HUMA/USDT", "BANK/USDT", "ZEC/USDT"]
+            # DYNAMIC DISCOVERY: Fetch every single real active futures contract running on CoinDCX!
+            dynamic_watchlist = await exchange.fetch_active_futures_watchlist()
             
             await run_scanning_loop(db, strategy, exchange, dynamic_watchlist, mode)
             

@@ -1,7 +1,7 @@
 """
 Module: exchange_layer
 Description: Production direct institutional execution driver for CoinDCX Futures.
-             Includes strict 15-second network socket timeouts to prevent terminal lockups.
+             Includes strict 15-second network socket timeouts and automated watchlist discovery.
 """
 
 import hmac
@@ -30,6 +30,39 @@ class CoinDCXExchangeEngine:
             hashlib.sha256
         ).hexdigest()
 
+    def _sync_fetch_active_futures_watchlist(self) -> List[str]:
+        """Queries active derivatives instruments directly from CoinDCX and normalizes symbols."""
+        url = f"{self.base_url}/exchange/v1/derivatives/futures/data/active_instruments"
+        symbols = []
+        try:
+            resp = requests.get(url, timeout=15)
+            if resp.status_code == 200:
+                instruments = resp.json()
+                for inst in instruments:
+                    if not isinstance(inst, dict):
+                        continue
+                    # Pull standard asset identifier string (e.g., 'B-BTC_USDT')
+                    raw_pair = inst.get("pair") or inst.get("symbol")
+                    if raw_pair and raw_pair.startswith("B-"):
+                        # Normalize back to standard framework string 'BTC/USDT' for bot operations
+                        normalized = raw_pair.replace("B-", "").replace("_", "/")
+                        symbols.append(normalized)
+                
+                # Fallback safeguard array if exchange returns an un-parsable matrix structure
+                if not symbols:
+                    symbols = ["ZEC/USDT", "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"]
+                return symbols
+            else:
+                logger.error(f"[CoinDCX DYNAMIC WATCHLIST] Refused with code {resp.status_code}. Using hardcoded fallbacks.")
+                return ["ZEC/USDT", "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"]
+        except Exception as e:
+            logger.error(f"[CoinDCX DYNAMIC WATCHLIST] Failed loading active contracts footprint: {e}")
+            return ["ZEC/USDT", "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"]
+
+    async def fetch_active_futures_watchlist(self) -> List[str]:
+        """Asynchronous wrapper framework providing dynamic live watchlist arrays."""
+        return await asyncio.to_thread(self._sync_fetch_active_futures_watchlist)
+
     def _sync_fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> List[List[float]]:
         """Synchronous futures candlesticks pulling with explicit connection timeouts."""
         clean_pair = f"B-{symbol.replace('/', '_')}"
@@ -42,7 +75,6 @@ class CoinDCXExchangeEngine:
         }
         
         try:
-            # FIXED: Added explicit 15-second safety timeout
             resp = requests.get(url, params=query_params, timeout=15)
             if resp.status_code == 200:
                 data = resp.json()
@@ -58,7 +90,6 @@ class CoinDCXExchangeEngine:
                     ])
                 return normalized
             elif resp.status_code == 422:
-                # PATCH: Catch invalid/inactive contracts silently to prevent log spam
                 logger.warning(f"[CoinDCX FUTURES OHLCV] Skipping inactive/invalid pair: {clean_pair}")
                 return []
             else:
@@ -88,7 +119,6 @@ class CoinDCXExchangeEngine:
         }
         
         try:
-            # FIXED: Added explicit 15-second safety timeout
             resp = requests.post(url, data=body, headers=headers, timeout=15)
             if resp.status_code == 200:
                 balances = resp.json()
@@ -115,12 +145,10 @@ class CoinDCXExchangeEngine:
         url = f"{self.base_url}/exchange/v1/derivatives/futures/data/active_instruments"
         clean_pair = f"B-{symbol.replace('/', '_')}"
         try:
-            # FIXED: Added explicit 15-second safety timeout
             resp = requests.get(url, timeout=15)
             if resp.status_code == 200:
                 instruments = resp.json()
                 for inst in instruments:
-                    # PATCH: Ensure the element is a dictionary before calling .get()
                     if not isinstance(inst, dict):
                         continue
                         
@@ -176,7 +204,6 @@ class CoinDCXExchangeEngine:
         }
         
         try:
-            # FIXED: Added explicit 15-second safety timeout
             resp_entry = requests.post(url_create, data=body_entry, headers=headers_entry, timeout=15)
             data = resp_entry.json()
             if resp_entry.status_code != 200 or "id" not in data:
@@ -204,7 +231,6 @@ class CoinDCXExchangeEngine:
                 "Content-Type": "application/json"
             }
             
-            # FIXED: Added explicit 15-second safety timeout
             resp_tpsl = requests.post(url_tpsl, data=body_tpsl, headers=headers_tpsl, timeout=15)
             tpsl_data = resp_tpsl.json()
             logger.info(f"[CoinDCX FUTURES] Risk protection brackets locked to active position: {tpsl_data}")
