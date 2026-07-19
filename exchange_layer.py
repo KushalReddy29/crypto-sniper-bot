@@ -57,6 +57,10 @@ class CoinDCXExchangeEngine:
                         float(candle.get("volume", 0.0))
                     ])
                 return normalized
+            elif resp.status_code == 422:
+                # PATCH: Catch invalid/inactive contracts silently to prevent log spam
+                logger.warning(f"[CoinDCX FUTURES OHLCV] Skipping inactive/invalid pair: {clean_pair}")
+                return []
             else:
                 logger.error(f"[CoinDCX FUTURES OHLCV] Rejection status code {resp.status_code}: {resp.text}")
                 return []
@@ -116,6 +120,10 @@ class CoinDCXExchangeEngine:
             if resp.status_code == 200:
                 instruments = resp.json()
                 for inst in instruments:
+                    # PATCH: Ensure the element is a dictionary before calling .get()
+                    if not isinstance(inst, dict):
+                        continue
+                        
                     if inst.get("pair") == clean_pair or inst.get("symbol") == clean_pair:
                         return {
                             "amount_precision": int(inst.get("target_currency_precision", 4)),
