@@ -1,17 +1,17 @@
 """
 Module: bot
 Description: Production entry point and main orchestration loop for the AI Crypto Trading Agent.
-             Implements high-frequency concurrent scanning across institutional watcher matrices.
+             Implements high-frequency concurrent scanning across institutional watcher matrices
+             with dynamic risk-bracket isolation and asynchronous Telegram reporting.
 """
 
 import asyncio
 import logging
 import time
 import sys
+import aiohttp
 from typing import List
 
-# Import your configuration, database, exchange, and strategy layers
-# Make sure these module names match your project files exactly
 from config_engine import settings
 from database_layer import QuantumDatabaseManager
 from exchange_layer import CoinDCXExchangeEngine
@@ -25,66 +25,107 @@ logging.basicConfig(
 )
 logger = logging.getLogger("AgentLogger")
 
-async def process_single_symbol(symbol: str, exchange: CoinDCXExchangeEngine, strategy: SniperStrategyAI, db: QuantumDatabaseManager, mode: str):
-    """Worker task to fetch data, score metrics, and record setups for an individual token."""
+async def dispatch_telegram_alert(symbol: str, score: float, entry: float, sl: float, tp: float, mode: str):
+    """Dispatches real-time setup alerts to the designated Telegram channel via non-blocking async POST requests."""
+    token = settings.TELEGRAM_BOT_TOKEN
+    chat_id = settings.TELEGRAM_CHAT_ID
+    
+    if not token or not chat_id or token == "YOUR_TELEGRAM_BOT_TOKEN":
+        logger.warning("[TELEGRAM] Notification skipped. Credentials missing from environment variables.")
+        return
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    message_text = (
+        f"🎯 **🚨 SNIPER SIGNAL ISOLATED** 🚨\n\n"
+        f"▪️ **Asset:** #{symbol.replace('/', '_')}\n"
+        f"▪️ **Mode:** `{mode}`\n"
+        f"▪️ **Match Probability:** `{score}%`\n\n"
+        f"📈 **Execution Matrix:**\n"
+        f"🔹 **Entry Price:** `{entry:.4f}`\n"
+        f"🛑 **Stop Loss (SL):** `{sl:.4f}`\n"
+        f"🎯 **Take Profit (TP):** `{tp:.4f}`"
+    )
+
+    payload = {
+        "chat_id": chat_id,
+        "text": message_text,
+        "parse_mode": "Markdown"
+    }
+
     try:
-        timeframe = "1m"  # Standard high-frequency window
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, timeout=10) as response:
+                if response.status == 200:
+                    logger.info(f"[TELEGRAM] Alert broadcast successfully for {symbol}.")
+                else:
+                    res_text = await response.text()
+                    logger.error(f"[TELEGRAM] Delivery API rejection ({response.status}): {res_text}")
+    except Exception as e:
+        logger.error(f"[TELEGRAM] Failed to send socket notification packet: {e}")
+
+async def process_single_symbol(symbol: str, exchange: CoinDCXExchangeEngine, strategy: SniperStrategyAI, db: QuantumDatabaseManager, mode: str):
+    """Worker task to fetch data, score metrics, calculate SL/TP brackets, and record setups concurrently."""
+    try:
+        timeframe = "1m"
         
         # 1. Fetch clean candles via the patched non-blocking exchange layer
         candles = await exchange.fetch_clean_ohlcv(symbol, timeframe, limit=100)
         if not candles:
-            return  # Gracefully skip if invalid/422/empty
+            return  
             
-        # 2. Run your strategy evaluation logic
-        # Note: If your strategy method has a slightly different name, match it here
+        # 2. Run strategy evaluation logic
         score = await strategy.analyze_asset(symbol, candles) 
         
         # 3. Handle setup isolation if threshold conditions are reached
         if score >= strategy.min_score_threshold:
-            logger.info(f"🏆 Champion Setup Isolated: {symbol} with probability metric: {score}")
+            # Extract current close price from the candle matrix matrix
+            current_close = float(candles[-1][4])
             
-            # Record the position cleanly in the local database registry
+            # Formulate structural risk brackets (5% SL / 25% TP for Long configurations)
+            stop_loss = current_close * 0.95
+            take_profit = current_close * 1.25
+            
+            logger.info(
+                f"🏆 Champion Setup Isolated: {symbol}\n"
+                f"   | Score: {score}% | Entry: {current_close} | SL: {stop_loss:.4f} | TP: {take_profit:.4f}"
+            )
+            
+            # Record the execution profile directly inside your SQLite tracking layers
             await db.record_position_entry(symbol, score)
             
-            # --- TELEGRAM DISPATCH TRIGGER ---
-            # If your telegram alert system is active, call it here:
-            # await telegram.send_signal(symbol, score, mode)
+            # Fire the async Telegram alert to the chat group
+            asyncio.create_task(dispatch_telegram_alert(symbol, score, current_close, stop_loss, take_profit, mode))
+            
+            # If executing live/paper orders directly on CoinDCX futures endpoints, uncomment below:
+            # await exchange.execute_sniper_trade(symbol, "LONG", 1.0, current_close, stop_loss, take_profit)
             
     except Exception as e:
-        # Suppress individual token failures to protect the rest of the concurrent batch execution
         pass
 
 async def run_scanning_loop(db: QuantumDatabaseManager, strategy: SniperStrategyAI, exchange: CoinDCXExchangeEngine, dynamic_watchlist: List[str], mode: str):
     """Optimized parallel processing engine scanning hundreds of pairs simultaneously using async tasks."""
     logger.info(f"[SCANNER] Launching batch-managed parallel sweep across {len(dynamic_watchlist)} contracts...")
     
-    # Caps concurrent network requests to prevent CoinDCX from blocking your cloud IP
     sem = asyncio.Semaphore(20) 
     
     async def safe_worker(symbol: str):
         async with sem:
             await process_single_symbol(symbol, exchange, strategy, db, mode)
             
-    # Spawn background concurrent processing tasks for every asset in the matrix
     tasks = [safe_worker(symbol) for symbol in dynamic_watchlist]
-    
-    # Fire off all 482+ requests in parallel execution matrix
     await asyncio.gather(*tasks)
 
 async def main():
     """Main lifecycle manager stabilizing the operational pipeline."""
     logger.info("[ENGINE HEARTBEAT] Booting up crypto trading engine...")
     
-    # 1. Instantiate the database manager and enforce data schemas
     db = QuantumDatabaseManager()
     await db.initialize_tables()
     logger.info("[DATABASE] CoinDCX tracking registers ready.")
     
-    # 2. Instantiate the institutional core strategy matrix 
     strategy = SniperStrategyAI(min_score_threshold=settings.MIN_SCORE_THRESHOLD)
     logger.info("[DATABASE] Machine learning strategy weights table seeded successfully.")
     
-    # 3. Mount secure credentials onto the exchange execution framework
     exchange = CoinDCXExchangeEngine(
         api_key=settings.COINDCX_API_KEY,
         api_secret=settings.COINDCX_API_SECRET,
@@ -94,17 +135,11 @@ async def main():
     mode = "PAPER" if settings.USE_TESTNET else "LIVE"
     logger.info(f"[ENGINE HEARTBEAT] System operating mode armed: {mode}")
     
-    # 4. Enter the infinite high-frequency orchestration execution loop
     while True:
         try:
-            # Query the master registry for active exchange symbols
-            # Note: Ensure this function maps directly to your watchlist query structure
             dynamic_watchlist = await exchange.get_active_futures_watchlist()
-            
-            # Trigger the rapid parallelized market scan matrix
             await run_scanning_loop(db, strategy, exchange, dynamic_watchlist, mode)
             
-            # Cool down for 60 seconds before initiating the next matrix sweep
             logger.info(f"[ENGINE HEARTBEAT] Sweep finished. Cooling down for 60 seconds...")
             await asyncio.sleep(60)
             
@@ -113,7 +148,7 @@ async def main():
             break
         except Exception as e:
             logger.error(f"[CRITICAL APPLICATION FAULT] Core daemon loop crashed: {e}")
-            await asyncio.sleep(10)  # Safe delay before self-healing and restart
+            await asyncio.sleep(10)  
 
 if __name__ == "__main__":
     asyncio.run(main())
