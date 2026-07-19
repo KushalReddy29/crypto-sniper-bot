@@ -137,7 +137,8 @@ async def main():
     
     while True:
         try:
-            dynamic_watchlist = await exchange.get_active_futures_watchlist()
+            # NEW LOGIC: Use a defined test asset list to verify scanning functionality
+            dynamic_watchlist = ["HUMA/USDT", "BANK/USDT", "ZEC/USDT"]
             await run_scanning_loop(db, strategy, exchange, dynamic_watchlist, mode)
             
             logger.info(f"[ENGINE HEARTBEAT] Sweep finished. Cooling down for 60 seconds...")
