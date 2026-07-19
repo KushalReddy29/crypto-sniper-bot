@@ -1,6 +1,6 @@
 """
 Module: bot
-Description: Finalized production entry point for the AI Crypto Sniper Agent.
+Description: Production entry point for the AI Crypto Sniper Agent.
              Orchestrates parallel matrix scanning, automated SL/TP isolation,
              async Telegram alerts, and an embedded HTTP listener for cloud port-binding.
 """
@@ -42,7 +42,6 @@ class RenderHealthCheckServer(BaseHTTPRequestHandler):
 
 def run_dummy_web_server():
     """Binds to the port provided by Render to prevent deployment timeout crashes."""
-    # Render passes down the designated port via environment variable automatically
     port = int(os.environ.get("PORT", 10000))
     server = HTTPServer(("0.0.0.0", port), RenderHealthCheckServer)
     logger.info(f"[PORT BINDING] Health check web server listening on port {port}...")
@@ -114,11 +113,14 @@ async def process_single_symbol(symbol: str, exchange: CoinDCXExchangeEngine, st
                 f"   | Score: {score}% | Entry: {current_close} | SL: {stop_loss:.4f} | TP: {take_profit:.4f}"
             )
             
-            # Record the execution profile inside your SQLite tracking layers
+            # Record the execution profile inside your SQLite tracking layers (Paper Trading)
             await db.record_position_entry(symbol, score)
             
             # Fire the async Telegram alert to the chat group in the background
             asyncio.create_task(dispatch_telegram_alert(symbol, score, current_close, stop_loss, take_profit, mode))
+            
+            # NOTE: To turn on live trades in CoinDCX by the end of the day, uncomment the line below:
+            # await exchange.execute_sniper_trade(symbol, "LONG", 1.0, current_close, stop_loss, take_profit)
             
     except Exception as e:
         pass
@@ -148,8 +150,9 @@ async def main():
     await db.initialize_tables()
     logger.info("[DATABASE] CoinDCX tracking registers ready.")
     
-    strategy = SniperStrategyAI(min_score_threshold=settings.MIN_SCORE_THRESHOLD)
-    logger.info("[DATABASE] Machine learning strategy weights table seeded successfully.")
+    # FORCE ZERO THRESHOLD FOR INSTANT PIPELINE VERIFICATION
+    strategy = SniperStrategyAI(min_score_threshold=0)
+    logger.info("[DATABASE] Machine learning strategy weights table seeded successfully with forced 0 threshold.")
     
     exchange = CoinDCXExchangeEngine(
         api_key=settings.COINDCX_API_KEY,
